@@ -166,6 +166,8 @@ let needSetup = false;
     await server.initAfterDatabaseReady();
 
     server.entryPage = await Settings.get("entryPage");
+    
+    const mainRouter = express.Router();
     await StatusPage.loadDomainMappingList();
 
     log.info("server", "Adding route");
@@ -175,7 +177,7 @@ let needSetup = false;
     // ***************************
 
     // Entry Page
-    app.get("/", async (request, response) => {
+    mainRouter.get("/", async (request, response) => {
         let hostname = request.hostname;
         if (await setting("trustProxy")) {
             const proxy = request.headers["x-forwarded-host"];
@@ -184,7 +186,7 @@ let needSetup = false;
             }
         }
 
-        log.debug("entry", `Request Domain: ${hostname}`);
+        log.debug("entry", `Request Domain: ${request.hostname}`);
 
         const uptimeKumaEntryPage = server.entryPage;
         if (hostname in StatusPage.domainMappingList) {
@@ -194,22 +196,22 @@ let needSetup = false;
             await StatusPage.handleStatusPageResponse(response, server.indexHTML, slug);
 
         } else if (uptimeKumaEntryPage && uptimeKumaEntryPage.startsWith("statusPage-")) {
-            response.redirect("/status/" + uptimeKumaEntryPage.replace("statusPage-", ""));
+            response.redirect(server.basePath + "status/" + uptimeKumaEntryPage.replace("statusPage-", ""));
 
         } else {
-            response.redirect("/dashboard");
+            response.redirect(server.basePath + "dashboard");
         }
     });
 
     if (isDev) {
-        app.post("/test-webhook", async (request, response) => {
+        mainRouter.post("/test-webhook", async (request, response) => {
             log.debug("test", request.body);
             response.send("OK");
         });
     }
 
     // Robots.txt
-    app.get("/robots.txt", async (_request, response) => {
+    mainRouter.get("/robots.txt", async (_request, response) => {
         let txt = "User-agent: *\nDisallow:";
         if (!await setting("searchEngineIndex")) {
             txt += " /";
@@ -222,29 +224,29 @@ let needSetup = false;
 
     // Prometheus API metrics  /metrics
     // With Basic Auth using the first user's username/password
-    app.get("/metrics", basicAuth, prometheusAPIMetrics());
+    mainRouter.get("/metrics", basicAuth, prometheusAPIMetrics());
 
-    app.use("/", expressStaticGzip("dist", {
+    mainRouter.use("/", expressStaticGzip("dist", {
         enableBrotli: true,
     }));
 
     // ./data/upload
-    app.use("/upload", express.static(Database.uploadDir));
+    mainRouter.use("/upload", express.static(Database.uploadDir));
 
-    app.get("/.well-known/change-password", async (_, response) => {
+    mainRouter.get("/.well-known/change-password", async (_, response) => {
         response.redirect("https://github.com/louislam/uptime-kuma/wiki/Reset-Password-via-CLI");
     });
 
     // API Router
     const apiRouter = require("./routers/api-router");
-    app.use(apiRouter);
+    mainRouter.use(apiRouter);
 
     // Status Page Router
     const statusPageRouter = require("./routers/status-page-router");
-    app.use(statusPageRouter);
+    mainRouter.use(statusPageRouter);
 
     // Universal Route Handler, must be at the end of all express routes.
-    app.get("*", async (_request, response) => {
+    mainRouter.get("*", async (_request, response) => {
         if (_request.originalUrl.startsWith("/upload/")) {
             response.status(404).send("File not found.");
         } else {
@@ -252,6 +254,8 @@ let needSetup = false;
         }
     });
 
+    app.use(server.basePath, mainRouter);
+    
     log.info("server", "Adding socket handler");
     io.on("connection", async (socket) => {
 

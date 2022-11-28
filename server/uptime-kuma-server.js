@@ -60,6 +60,17 @@ class UptimeKumaServer {
         const sslKey = args["ssl-key"] || process.env.UPTIME_KUMA_SSL_KEY || process.env.SSL_KEY || undefined;
         const sslCert = args["ssl-cert"] || process.env.UPTIME_KUMA_SSL_CERT || process.env.SSL_CERT || undefined;
 
+        let basePathEnv = process.env.UPTIME_KUMA_BASE_PATH || process.env.BASE_PATH || "/";
+
+        if (!basePathEnv.startsWith("/")) {
+            basePathEnv = "/" + basePathEnv;
+        }
+        if (!basePathEnv.endsWith("/")) {
+            basePathEnv = basePathEnv + "/";
+        }
+
+        this.basePath = basePathEnv;
+
         log.info("server", "Creating express and socket.io instance");
         this.app = express();
         if (sslKey && sslCert) {
@@ -75,6 +86,7 @@ class UptimeKumaServer {
 
         try {
             this.indexHTML = fs.readFileSync("./dist/index.html").toString();
+            this.indexHTML = this.indexHTML.replace(/<base href.*?>/, `<base href="${this.basePath}">`);
         } catch (e) {
             // "dist/index.html" is not necessary for development
             if (process.env.NODE_ENV !== "development") {
@@ -85,7 +97,9 @@ class UptimeKumaServer {
 
         CacheableDnsHttpAgent.registerGlobalAgent();
 
-        this.io = new Server(this.httpServer);
+        this.io = new Server(this.httpServer, {
+            path: this.basePath + "socket.io"
+        });
     }
 
     async initAfterDatabaseReady() {
